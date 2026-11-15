@@ -21,7 +21,7 @@ So this project is:
 
 1. **A snapshot per task** of every model the Hub lists under that `pipeline_tag` (`tasks/<task>/data/`).
 2. **An unofficial taxonomy per task**, built with Claude: I give examples of what I see as the canonical subcategories, and Claude records them against the snapshot (`tasks/<task>/taxonomy.json`).
-3. **Labels**, model by model, from a private annotation Space.
+3. **Labels**, model by model, in Carrot Cake Lab (Label Studio project 34, since 2026-11-15; the `space/` annotator was never deployed).
 4. **Later, a classifier** trained on those labels, so new models can be sorted by my rubric automatically.
 
 It's a personal notebook, kept public in case it's useful to others interested in these tasks.
@@ -39,7 +39,8 @@ It's a personal notebook, kept public in case it's useful to others interested i
 | `tasks/<task>/data/models.json`, `models.csv` | Hub snapshot for the task (`uv run scripts/fetch_task_models.py <task>`). |
 | `tasks/<task>/taxonomy.json` | Subcategories: definition, use cases, example models, tag signals. Source of truth. |
 | `scripts/sync_hf_datasets.py` | Pushes a task's taxonomy, queue and seed labels to the Hub datasets. |
-| `space/` | Annotation Space app (Gradio). |
+| `space/` | Annotation Space app (Gradio). Not deployed; its queue, labels and record format now run in Label Studio. |
+| `scripts/ls_build_tasks.py`, `scripts/ls_export.py` | Queue -> Label Studio tasks; Label Studio labels -> `annotations/` (see below). |
 | `scripts/build_hub_tags.py`, `hub-tags/` | Hub-wide tag inventory, published as `danielrosehill/HF-Model-Tags` (`hub-tags/out/` is gitignored). |
 | `.claude/skills/task-taxonomy/` | Repo-level Claude Code skill for adding subcategories. |
 
@@ -48,8 +49,26 @@ It's a personal notebook, kept public in case it's useful to others interested i
 | Repo | Visibility | Contents |
 |---|---|---|
 | [`danielrosehill/Taxonomy-Of-AI`](https://huggingface.co/datasets/danielrosehill/Taxonomy-Of-AI) | public dataset | `taxonomy/<task>.json`, `labels/<task>.seed.jsonl`, reviewed labels as they're exported |
-| `danielrosehill/Taxonomy-Of-AI-Working` | private dataset | `queue/<task>.jsonl` (models to label, most downloaded first, with tag-based suggestions), `annotations/` from the Space |
+| `danielrosehill/Taxonomy-Of-AI-Working` | private dataset | `queue/<task>.jsonl` (models to label, most downloaded first, with tag-based suggestions), `annotations/` (Space record format; written by `scripts/ls_export.py`) |
 | `danielrosehill/Taxonomy-Of-AI-Annotator` | private Space | one model at a time with its card, one button per subcategory |
+
+## Labelling in Carrot Cake Lab (since 2026-11-15)
+
+Project 34 "Taxonomy of AI: audio-to-audio": https://carrotcakelab.com/projects/34 (Label Studio, residencehome; API on
+the LAN at http://10.0.0.2:8140). Same queue order (most downloaded first), same buttons as `space/app.py`: keys 1-6 for
+the subcategories, 0 new category (typed id -> `new:<id>`), 7 unsure, 8 misc, 9 not audio-to-audio, "Also fits" for
+`secondary`, notes. The tag-signal `suggested` subcategories are pre-selected as a prediction (`tag-signal`).
+
+```bash
+with-secrets uv run scripts/ls_build_tasks.py audio-to-audio --start 15 --n 100 -o /tmp/toa/tasks.json  # next batch, card text fetched
+with-secrets python3 -I <Carrot-Cake-Lab-Plugin>/scripts/ccl.py import 34 /tmp/toa/tasks.json --confirm
+with-secrets uv run scripts/ls_export.py --out /tmp/toa-export [--push]   # -> annotations/<ts>-ls34.jsonl
+```
+
+The export writes the Space's record exactly (`model_id, task, subcategory, secondary, source, annotator, labeled_at,
+notes`); checked 2026-11-15 on synthetic annotations only (no labels existed yet). `--start` counts unlabelled models,
+so after an export, start at 0 again and the builder skips what is in `annotations/` (tasks still in Label Studio
+but not exported would be duplicated: export first).
 
 ## Hub-wide sources (for later tasks and the classifier)
 
