@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HF Tag Editor</title>
+<style>
+:root{--bg:#0f1115;--fg:#e6e6e6;--mut:#8b93a1;--card:#171a21;--line:#262b36;--acc:#ffb000;--acc2:#5aa9ff;--del:#ff5a5a}
+@media (prefers-color-scheme: light){:root{--bg:#fafafa;--fg:#1b1d22;--mut:#5d6573;--card:#fff;--line:#e3e5ea;--acc:#c77700;--acc2:#1f6fd1;--del:#c62828}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:16px 22px 4px}h1{margin:0 0 4px;font-size:21px}header p{margin:2px 0;color:var(--mut)}
+a{color:var(--acc2);text-decoration:none}
+.controls{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.controls label{color:var(--mut);display:flex;gap:6px;align-items:center}
+input,select,button{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+input[type=search]{width:240px}input[type=number]{width:72px}button{cursor:pointer}button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);border-color:var(--acc);color:#111;font-weight:600}button.danger{border-color:var(--del);color:var(--del)}
+button:disabled{opacity:.4;cursor:default}
+.chips{display:flex;flex-wrap:wrap;gap:4px;padding:6px 22px 0}.chip{padding:2px 9px;border-radius:12px;font-size:12px;border:1px solid var(--line);cursor:pointer;user-select:none;color:var(--mut)}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#111}
+.stat{padding:8px 22px;color:var(--mut)}#msg{color:var(--acc)}
+table{border-collapse:collapse;width:calc(100% - 44px);margin:0 22px 20px}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:500;white-space:nowrap}td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}th.n{text-align:right}
+.kind{font-size:12px;color:var(--mut)}.tag{font-weight:600;word-break:break-word}
+tr.del td{opacity:.45}tr.del .tag{text-decoration:line-through;color:var(--del)}tr.pend td{background:rgba(255,176,0,.08)}
+tr.sel td{background:rgba(90,169,255,.12)}
+.vars{font-size:12px;color:var(--mut);margin-top:2px}.vars span{display:inline-block;margin:1px 5px 1px 0;padding:0 5px;border:1px solid var(--line);border-radius:4px}
+.b{padding:1px 7px;font-size:12px}.more{margin:0 22px 30px}kbd{border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>HF Tag Editor</h1>
+  <p id="sub">Loading…</p>
+  <p>Delete tag groups from the curated copy. Changes queue up until you press <b>Save</b>; each save is one commit to the dataset. Shift-click checkboxes to select a range.</p>
+</header>
+<div class="controls">
+  <input type="search" id="q" placeholder="Search tags and spellings…">
+  <label>Sort <select id="sort">
+    <option value="models">Most used</option><option value="az">A → Z</option><option value="za">Z → A</option>
+    <option value="azl">A → Z, letters first</option><option value="least">Least used</option><option value="dl">Downloads 30d</option>
+  </select></label>
+  <label>Starts with <input id="pre" style="width:60px" placeholder="a"></label>
+  <label>Models <input type="number" id="min" value="3" min="1"> – <input type="number" id="max" placeholder="any" min="1"></label>
+  <label>View <select id="view"><option value="live">kept</option><option value="del">deleted</option><option value="all">all</option></select></label>
+  <button id="delSel" class="danger" disabled>Delete selected (0)</button>
+  <button id="delAll" class="danger" title="Delete every tag matching the current filter (click twice)">Delete all filtered</button>
+  <button id="undo" disabled>Undo</button>
+  <button id="save" class="primary" disabled>Save (0)</button>
+  <span id="msg"></span>
+</div>
+<div class="chips" id="kinds"></div>
+<div class="stat" id="stat"></div>
+<table>
+  <thead><tr><th><input type="checkbox" id="all"></th><th>Tag</th><th>Kind</th><th class="n">Models</th><th class="n">Downloads 30d</th><th>Top pipeline</th><th></th></tr></thead>
+  <tbody id="tb"></tbody>
+</table>
+<button class="more" id="more">Show more</button>
+<script>
+const $ = id => document.getElementById(id), fmt = n => n.toLocaleString("en-US");
+const esc = s => s.replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const coll = new Intl.Collator("en", {sensitivity: "base", numeric: true});
+const isLetter = s => /^\p{L}/u.test(s);
+let rows, deleted, pending = new Map(), history = [], sel = new Set(), kindsOn, shown = 300, view = [], lastIdx = null, armed = 0;
+const isDel = t => pending.has(t) ? pending.get(t) === "delete" : deleted.has(t);
+fetch("api/rows").then(r => r.json()).then(d => {
+  rows = d.rows.map(r => ({tag: r[0], kind: d.kinds[r[1]], models: r[2], dl: r[3], pipe: d.pipelines[r[4]], nv: r[5],
+    vars: r.slice(7).map(v => v.split("\t")), hay: (r[0] + " " + r.slice(7).map(v => v.split("\t")[0]).join(" ")).toLowerCase()}));
+  deleted = new Set(d.deleted);
+  $("sub").innerHTML = `Editing <a target="_blank" href="https://huggingface.co/datasets/${d.repo}">${d.repo}</a>: ${fmt(rows.length)} tag groups of semantic kinds, ${fmt(deleted.size)} deleted so far, ${fmt(d.edits)} edits logged.`;
+  kindsOn = new Set(d.kinds);
+  const counts = {}; rows.forEach(r => counts[r.kind] = (counts[r.kind] || 0) + 1);
+  d.kinds.forEach(k => { const c = document.createElement("span"); c.className = "chip on"; c.textContent = `${k} ${fmt(counts[k])}`;
+    c.onclick = () => { kindsOn.has(k) ? kindsOn.delete(k) : kindsOn.add(k); c.classList.toggle("on"); reset(); }; $("kinds").append(c); });
+  render();
+});
+function filtered() {
+  const q = $("q").value.trim().toLowerCase(), pre = $("pre").value.trim().toLowerCase(), min = +$("min").value || 1,
+        max = +$("max").value || Infinity, v = $("view").value;
+  let f = rows.filter(r => kindsOn.has(r.kind) && r.models >= min && r.models <= max && (!q || r.hay.includes(q)) &&
+    (!pre || r.tag.toLowerCase().startsWith(pre)) && (v === "all" || (v === "del") === isDel(r.tag)));
+  const s = $("sort").value;
+  if (s === "az") f.sort((a, b) => coll.compare(a.tag, b.tag));
+  else if (s === "za") f.sort((a, b) => coll.compare(b.tag, a.tag));
+  else if (s === "azl") f.sort((a, b) => (isLetter(b.tag) - isLetter(a.tag)) || coll.compare(a.tag, b.tag));
+  else if (s === "least") f.sort((a, b) => a.models - b.models);
+  else if (s === "dl") f.sort((a, b) => b.dl - a.dl);
+  return f;
+}
+function render() {
+  view = filtered();
+  $("stat").textContent = `${fmt(view.length)} tags match`;
+  $("tb").innerHTML = view.slice(0, shown).map((r, i) => {
+    const d = isDel(r.tag), p = pending.has(r.tag),
+      v = r.nv > 1 ? `<div class="vars">${r.vars.map(([t, n]) => `<span>${esc(t)} · ${fmt(+n)}</span>`).join("")}${r.nv > r.vars.length ? ` +${r.nv - r.vars.length}` : ""}</div>` : "";
+    return `<tr data-i="${i}" class="${d ? "del" : ""} ${p ? "pend" : ""} ${sel.has(r.tag) ? "sel" : ""}"><td><input type="checkbox" class="cb" ${sel.has(r.tag) ? "checked" : ""}></td>
+      <td><span class="tag">${esc(r.tag)}</span> <a class="kind" target="_blank" href="https://huggingface.co/models?other=${encodeURIComponent(r.tag)}">↗</a>${v}</td>
+      <td class="kind">${r.kind}</td><td class="n">${fmt(r.models)}</td><td class="n">${fmt(r.dl)}</td><td class="kind">${r.pipe}</td>
+      <td><button class="b tg">${d ? "restore" : "delete"}</button></td></tr>`; }).join("");
+  $("more").style.display = view.length > shown ? "" : "none";
+  $("delSel").textContent = `Delete selected (${sel.size})`; $("delSel").disabled = !sel.size;
+  $("save").textContent = `Save (${pending.size})`; $("save").disabled = !pending.size; $("undo").disabled = !history.length;
+  $("all").checked = view.length > 0 && view.slice(0, shown).every(r => sel.has(r.tag));
+}
+function apply(tags, op) {   // op: delete | restore; records one undo step
+  const step = [];
+  tags.forEach(t => { const before = pending.has(t) ? pending.get(t) : null; const now = isDel(t);
+    if ((op === "delete") === now) return; step.push([t, before]);
+    if (before !== null && (op === "delete") === deleted.has(t)) pending.delete(t); else pending.set(t, op); });
+  if (step.length) history.push(step);
+  sel.clear(); render();
+}
+const reset = () => { shown = 300; sel.clear(); lastIdx = null; render(); };
+$("tb").onclick = e => {
+  const tr = e.target.closest("tr"); if (!tr) return; const i = +tr.dataset.i, r = view[i];
+  if (e.target.classList.contains("tg")) return apply([r.tag], isDel(r.tag) ? "restore" : "delete");
+  if (e.target.classList.contains("cb")) {
+    const on = e.target.checked, idx = e.shiftKey && lastIdx !== null ? [Math.min(lastIdx, i), Math.max(lastIdx, i)] : [i, i];
+    for (let j = idx[0]; j <= idx[1]; j++) on ? sel.add(view[j].tag) : sel.delete(view[j].tag);
+    lastIdx = i; render();
+  }
+};
+$("all").onchange = e => { view.slice(0, shown).forEach(r => e.target.checked ? sel.add(r.tag) : sel.delete(r.tag)); render(); };
+$("delSel").onclick = () => apply([...sel], "delete");
+$("delAll").onclick = () => {
+  const n = view.filter(r => !isDel(r.tag)).length; if (!n) return;
+  if (Date.now() - armed > 4000) { armed = Date.now(); $("delAll").textContent = `Click again: delete ${fmt(n)}`; setTimeout(() => $("delAll").textContent = "Delete all filtered", 4000); return; }
+  armed = 0; $("delAll").textContent = "Delete all filtered"; apply(view.map(r => r.tag), "delete");
+};
+$("undo").onclick = () => { const step = history.pop(); if (!step) return;
+  step.forEach(([t, before]) => before === null ? pending.delete(t) : pending.set(t, before)); render(); };
+$("save").onclick = async () => {
+  const ops = [...pending].map(([tag, op]) => ({op, tag})); $("save").disabled = true; $("msg").textContent = `Saving ${ops.length}…`;
+  try { const r = await fetch("api/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ops})});
+    if (!r.ok) throw new Error(await r.text()); const j = await r.json();
+    ops.forEach(o => o.op === "delete" ? deleted.add(o.tag) : deleted.delete(o.tag)); pending.clear(); history = [];
+    $("msg").textContent = `Saved: ${fmt(j.deleted_total)} deleted in total (commit ${j.commit.slice(0, 7)})`; render();
+  } catch (err) { $("msg").textContent = "Save failed: " + err.message; $("save").disabled = false; }
+};
+let deb; ["q", "pre"].forEach(id => $(id).oninput = () => { clearTimeout(deb); deb = setTimeout(reset, 150); });
+["sort", "min", "max", "view"].forEach(id => $(id).onchange = reset);
+$("more").onclick = () => { shown += 500; render(); };
+window.onbeforeunload = () => pending.size ? "Unsaved changes" : undefined;
+</script>
+</body>
+</html>

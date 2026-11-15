@@ -14,7 +14,11 @@ for existing ones, moves, and asides. Read `task-taxonomy` first: its schema, fi
 - **Typed or pasted notes:** use as is.
 - **Audio** (path, URL, or "the voice note I just sent"): transcribe with whatever transcription skill or ASR
   endpoint the session has. Prefer one that handles technical vocabulary; model IDs come out mangled either way
-  ("parakeet tee dee tee" = `parakeet-tdt`), and step 3 fixes them. Keep the transcript in your reply, not in the repo.
+  ("parakeet tee dee tee" = `parakeet-tdt`), and step 3 fixes them.
+- **Store every recording** in the private dataset `danielrosehill/Taxonomy-Of-AI-Voice-Notes` with its raw transcript
+  (not in this public repo): `uv run scripts/voice_note.py add <audio> --transcript <txt> --task <task> --slug <short-name> --asr <model>`.
+  It prints the note `id` (`YYYY-MM-DD_<slug>`). After step 4, record what it became:
+  `uv run scripts/voice_note.py processed <id> <subcategory id> ...`.
 - Dictated text has no punctuation and runs ideas together. Say "I read this as ..." where it matters; don't
   call the wording garbled and don't ask the user to repeat it.
 

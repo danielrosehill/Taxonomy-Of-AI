@@ -37,6 +37,10 @@ footer{padding:0 22px 30px;color:var(--mut);font-size:12px}
 </header>
 <div class="controls">
   <input type="search" id="q" placeholder="Search tags and spellings…">
+  <label>Sort <select id="sortSel">
+    <option value="models">Most used</option><option value="az">A → Z</option><option value="za">Z → A</option>
+    <option value="azl">A → Z, letters first</option><option value="least">Least used</option><option value="dl">Downloads 30d</option>
+  </select></label>
   <label>Pipeline <select id="pipe"><option value="">any</option></select></label>
   <label>Min models <input type="number" id="min" value="3" min="1"></label>
   <label title="Hide the N most used tags among the current filter">Hide top <input type="number" id="topn" value="0" min="0"> most used</label>
@@ -94,8 +98,9 @@ function render() {
   let f = rows.filter(r => kindsOn.has(r.kind) && r.models >= min && (!pipe || r.pipe === pipe) && (!merged || r.nv > 1) && (!q || r.hay.includes(q)));
   const top = new Set(f.slice(0, topn).map(r => r.tag));   // rows are pre-sorted by models
   f = f.filter(r => !top.has(r.tag) && (sh || !hidden.has(r.tag)));
-  const {k, dir} = sort;
-  if (k !== "models" || dir !== -1) f = [...f].sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * dir);
+  const {k, dir} = sort, coll = new Intl.Collator("en", {sensitivity: "base", numeric: true}), L = s => /^\p{L}/u.test(s);
+  if (k === "tag") f = [...f].sort((a, b) => (sort.letters ? L(b.tag) - L(a.tag) : 0) || coll.compare(a.tag, b.tag) * dir);
+  else if (k !== "models" || dir !== -1) f = [...f].sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * dir);
   $("stat").textContent = `${fmt(f.length)} tags` + (topn ? ` (top ${topn} hidden)` : "") + (hidden.size && !sh ? `, ${fmt(hidden.size)} hidden by you` : "");
   document.querySelectorAll("th[data-s]").forEach(th => th.classList.toggle("sorted", th.dataset.s === k));
   $("tb").innerHTML = f.slice(0, shown).map(r => {
@@ -109,6 +114,8 @@ const esc = s => s.replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&g
 $("tb").onclick = e => { const t = e.target.dataset?.t; if (t === undefined) return;
   const tag = e.target.closest("tr").querySelector(".tag").textContent; hidden.has(tag) ? hidden.delete(tag) : hidden.add(tag); saveHidden(); render(); };
 let deb; $("q").oninput = () => { clearTimeout(deb); deb = setTimeout(() => { shown = 200; render(); }, 150); };
+$("sortSel").onchange = () => { sort = {models: {k: "models", dir: -1}, az: {k: "tag", dir: 1}, za: {k: "tag", dir: -1},
+  azl: {k: "tag", dir: 1, letters: true}, least: {k: "models", dir: 1}, dl: {k: "dl", dir: -1}}[$("sortSel").value]; shown = 200; render(); };
 ["pipe", "min", "topn", "merged", "showHidden"].forEach(id => $(id).onchange = () => { shown = 200; render(); });
 $("topn").oninput = $("min").oninput = () => render();
 $("more").onclick = () => { shown += 500; render(); };
