@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "description": "Unofficial taxonomy of Hugging Face audio-to-audio models (pipeline_tag=audio-to-audio). Subcategories are defined by use case, not by HF's task label.",
+    "snapshot": "data/models.json (fetched 2026-11-15T16:43Z)",
+    "started": "2026-11-15",
+    "updated": "2026-11-15"
+  },
+  "subcategories": []
+}
