@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HF Tag Explorer</title>
+<style>
+:root{--bg:#0f1115;--fg:#e6e6e6;--mut:#8b93a1;--card:#171a21;--line:#262b36;--acc:#ffb000;--acc2:#5aa9ff}
+@media (prefers-color-scheme: light){:root{--bg:#fafafa;--fg:#1b1d22;--mut:#5d6573;--card:#fff;--line:#e3e5ea;--acc:#c77700;--acc2:#1f6fd1}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:18px 22px 6px}h1{margin:0 0 4px;font-size:22px}header p{margin:2px 0;color:var(--mut)}
+a{color:var(--acc2);text-decoration:none}a:hover{text-decoration:underline}
+.controls{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.controls label{color:var(--mut);display:flex;gap:6px;align-items:center}
+input,select,button{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+input[type=search]{width:260px}input[type=number]{width:80px}button{cursor:pointer}button:hover{border-color:var(--acc)}
+.chips{display:flex;flex-wrap:wrap;gap:4px;padding:6px 22px 0}.chip{padding:2px 9px;border-radius:12px;font-size:12px;border:1px solid var(--line);cursor:pointer;user-select:none;color:var(--mut)}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#111}
+.stat{padding:8px 22px;color:var(--mut)}
+table{border-collapse:collapse;width:calc(100% - 44px);margin:0 22px 20px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:500;cursor:pointer;white-space:nowrap}th.sorted{color:var(--acc)}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}th.n{text-align:right}
+.kind{font-size:12px;color:var(--mut)}.tag{font-weight:600;word-break:break-word}
+tr.hidden td{opacity:.4}.vars{font-size:12px;color:var(--mut);margin-top:3px}
+.vars span{display:inline-block;margin:1px 6px 1px 0;padding:0 5px;border:1px solid var(--line);border-radius:4px}
+.badge{font-size:11px;padding:0 5px;border-radius:4px;border:1px solid var(--line);color:var(--mut);margin-left:6px}
+.hb{padding:1px 7px;font-size:12px}.more{margin:0 22px 30px}
+footer{padding:0 22px 30px;color:var(--mut);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>HF Tag Explorer</h1>
+  <p id="sub">Loading…</p>
+  <p>Every tag on Hugging Face models, deduplicated. Click a tag to open its models on the Hub. Hide the noise (per tag, or the top N most used) and it stays hidden in this browser.</p>
+</header>
+<div class="controls">
+  <input type="search" id="q" placeholder="Search tags and spellings…">
+  <label>Pipeline <select id="pipe"><option value="">any</option></select></label>
+  <label>Min models <input type="number" id="min" value="3" min="1"></label>
+  <label title="Hide the N most used tags among the current filter">Hide top <input type="number" id="topn" value="0" min="0"> most used</label>
+  <label><input type="checkbox" id="merged"> merged only</label>
+  <label><input type="checkbox" id="showHidden"> show hidden (<span id="hc">0</span>)</label>
+  <button id="unhide" title="Unhide every tag you hid">Unhide all</button>
+  <button id="exp">Export hidden</button>
+  <button id="imp">Import hidden</button>
+</div>
+<div class="chips" id="kinds"></div>
+<div class="stat" id="stat"></div>
+<table>
+  <thead><tr>
+    <th class="n" data-s="rank">#</th><th data-s="tag">Tag</th><th data-s="kind">Kind</th>
+    <th class="n" data-s="models" title="Models carrying the tag; a group's spellings are summed">Models</th>
+    <th class="n" data-s="dl">Downloads 30d</th><th data-s="pipe">Top pipeline</th>
+    <th class="n" data-s="nv">Spellings</th><th></th>
+  </tr></thead>
+  <tbody id="tb"></tbody>
+</table>
+<button class="more" id="more">Show more</button>
+<footer id="foot"></footer>
+<script>
+const $ = id => document.getElementById(id), fmt = n => n.toLocaleString("en-US");
+const HKEY = "hf-tag-explorer:hidden", KKEY = "hf-tag-explorer:kinds";
+let D, rows, hidden = new Set(JSON.parse(localStorage.getItem(HKEY) || "[]")), kindsOn, sort = {k: "models", dir: -1}, shown = 200;
+const saveHidden = () => { localStorage.setItem(HKEY, JSON.stringify([...hidden])); $("hc").textContent = hidden.size; };
+function hubUrl(tag, kind) {
+  const e = encodeURIComponent(tag);
+  if (kind === "pipeline_tag") return `https://huggingface.co/models?pipeline_tag=${e}`;
+  if (kind === "library") return `https://huggingface.co/models?library=${e}`;
+  return `https://huggingface.co/models?other=${e}`;
+}
+fetch("data.json").then(r => r.json()).then(d => {
+  D = d;
+  rows = d.rows.map((r, i) => ({tag: r[0], kind: d.kinds[r[1]], models: r[2], dl: r[3], pipe: d.pipelines[r[4]], nv: r[5],
+    merge: d.merges[r[6]], vars: r.slice(7).map(v => v.split("\t")), rank: i + 1,
+    hay: (r[0] + " " + r.slice(7).map(v => v.split("\t")[0]).join(" ")).toLowerCase()}));
+  const t = d.totals;
+  $("sub").textContent = `Snapshot ${d.snapshot}: ${fmt(t.models)} models, ${fmt(t.distinct_tags)} distinct tag strings → ${fmt(t.groups)} tag groups after deduplication. ${fmt(rows.length)} groups shown here.`;
+  $("foot").innerHTML = `Data: <a href="https://huggingface.co/datasets/${d.dataset}">${d.dataset}</a> (config <code>tag_groups</code>), built from <a href="https://huggingface.co/datasets/cfahlgren1/hub-stats">cfahlgren1/hub-stats</a>. Included: semantic tags on ${d.thresholds.semantic_min_models}+ models, ID tags (base_model, dataset, arxiv, …) on ${d.thresholds.id_min_models}+. Spellings merged by case and separators, singular/plural and -ing/-ed, and onto official Hub tags. Part of <a href="https://github.com/danielrosehill/Taxonomy-Of-AI">Taxonomy of AI</a>.`;
+  d.pipelines.filter(Boolean).forEach(p => $("pipe").add(new Option(p, p)));
+  const saved = JSON.parse(localStorage.getItem(KKEY) || "null");
+  kindsOn = new Set(saved || d.semantic_kinds.filter(k => d.kinds.includes(k)));
+  const counts = {}; rows.forEach(r => counts[r.kind] = (counts[r.kind] || 0) + 1);
+  d.kinds.forEach(k => { const c = document.createElement("span"); c.className = "chip" + (kindsOn.has(k) ? " on" : "");
+    c.textContent = `${k} ${fmt(counts[k])}`; c.onclick = () => { kindsOn.has(k) ? kindsOn.delete(k) : kindsOn.add(k);
+      c.classList.toggle("on"); localStorage.setItem(KKEY, JSON.stringify([...kindsOn])); shown = 200; render(); };
+    $("kinds").append(c); });
+  saveHidden(); render();
+});
+function render() {
+  const q = $("q").value.trim().toLowerCase(), pipe = $("pipe").value, min = +$("min").value || 1,
+        topn = +$("topn").value || 0, merged = $("merged").checked, sh = $("showHidden").checked;
+  let f = rows.filter(r => kindsOn.has(r.kind) && r.models >= min && (!pipe || r.pipe === pipe) && (!merged || r.nv > 1) && (!q || r.hay.includes(q)));
+  const top = new Set(f.slice(0, topn).map(r => r.tag));   // rows are pre-sorted by models
+  f = f.filter(r => !top.has(r.tag) && (sh || !hidden.has(r.tag)));
+  const {k, dir} = sort;
+  if (k !== "models" || dir !== -1) f = [...f].sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * dir);
+  $("stat").textContent = `${fmt(f.length)} tags` + (topn ? ` (top ${topn} hidden)` : "") + (hidden.size && !sh ? `, ${fmt(hidden.size)} hidden by you` : "");
+  document.querySelectorAll("th[data-s]").forEach(th => th.classList.toggle("sorted", th.dataset.s === k));
+  $("tb").innerHTML = f.slice(0, shown).map(r => {
+    const h = hidden.has(r.tag), v = r.nv > 1 ? `<div class="vars">${r.vars.map(([t, n]) => `<span>${esc(t)} · ${fmt(+n)}</span>`).join("")}${r.nv > r.vars.length ? ` +${r.nv - r.vars.length} more` : ""}</div>` : "";
+    return `<tr class="${h ? "hidden" : ""}"><td class="n">${r.rank}</td><td><a class="tag" target="_blank" href="${hubUrl(r.tag, r.kind)}">${esc(r.tag)}</a>${r.nv > 1 ? `<span class="badge" title="how spellings were merged">${r.merge}</span>` : ""}${v}</td>
+      <td class="kind">${r.kind}</td><td class="n">${fmt(r.models)}</td><td class="n">${fmt(r.dl)}</td><td class="kind">${r.pipe || ""}</td><td class="n">${r.nv}</td>
+      <td><button class="hb" data-t="${esc(r.tag)}">${h ? "unhide" : "hide"}</button></td></tr>`; }).join("");
+  $("more").style.display = f.length > shown ? "" : "none";
+}
+const esc = s => s.replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+$("tb").onclick = e => { const t = e.target.dataset?.t; if (t === undefined) return;
+  const tag = e.target.closest("tr").querySelector(".tag").textContent; hidden.has(tag) ? hidden.delete(tag) : hidden.add(tag); saveHidden(); render(); };
+let deb; $("q").oninput = () => { clearTimeout(deb); deb = setTimeout(() => { shown = 200; render(); }, 150); };
+["pipe", "min", "topn", "merged", "showHidden"].forEach(id => $(id).onchange = () => { shown = 200; render(); });
+$("topn").oninput = $("min").oninput = () => render();
+$("more").onclick = () => { shown += 500; render(); };
+$("unhide").onclick = () => { hidden.clear(); saveHidden(); render(); };
+document.querySelectorAll("th[data-s]").forEach(th => th.onclick = () => { const k = th.dataset.s;
+  sort = sort.k === k ? {k, dir: -sort.dir} : {k, dir: ["models", "dl", "nv"].includes(k) ? -1 : 1}; render(); });
+$("exp").onclick = () => { const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({hidden: [...hidden].sort()}, null, 2)], {type: "application/json"}));
+  a.download = "hidden-tags.json"; a.click(); };
+$("imp").onclick = () => { const i = document.createElement("input"); i.type = "file"; i.accept = ".json";
+  i.onchange = () => i.files[0].text().then(t => { (JSON.parse(t).hidden || []).forEach(x => hidden.add(x)); saveHidden(); render(); }); i.click(); };
+</script>
+</body>
+</html>

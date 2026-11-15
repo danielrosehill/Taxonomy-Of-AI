@@ -9,6 +9,8 @@ configs:
   data_files: snapshots/2026-11-15/tags.parquet
 - config_name: freeform_folded
   data_files: snapshots/2026-11-15/freeform_folded.parquet
+- config_name: tag_groups
+  data_files: snapshots/2026-11-15/tag_groups.parquet
 - config_name: kinds
   data_files: snapshots/2026-11-15/kinds.parquet
 ---
@@ -39,6 +41,15 @@ crowd-sourced classification of models, noisy but rich, and this makes the whole
 `voice_conversion` and `VoiceConversion` are one row. Columns: `key` (lowercased, letters and digits only),
 `most_common` (the most-used spelling), `model_count` (sum over variants; a model tagged with two variants counts
 twice), `n_variants`, `variants` (spellings, most used first).
+
+**`tag_groups`**: all tags deduplicated into groups (added 2026-11-16; 439,946 groups). `tag` names the group: the
+official tag if one is a member, else the most-used spelling. `kind` is that tag's kind. `model_count`, `downloads_30d`,
+`downloads_all_time` are summed over members (a model tagged with two spellings counts twice). `n_variants`,
+`variants` (`tag`, `kind`, `model_count`, most used first), `merge`: `none`, `fold` (case and separators), `official`
+(a freeform spelling of an official tag joined it, e.g. 13 spellings of `text-to-speech`), `stem` (plural and
+-ing/-ed forms, e.g. `fine-tuned` / `finetune` / `fine_tuning`). Model names with digits aren't stemmed; ID kinds
+(`base_model`, `dataset`, `arxiv`, ...) aren't merged. Code: `scripts/dedup_hub_tags.py`. Browse it in the
+[HF Tag Explorer](https://huggingface.co/spaces/danielrosehill/HF-Tag-Explorer) Space.
 
 **`kinds`**: distinct tags and total taggings per `kind`.
 
