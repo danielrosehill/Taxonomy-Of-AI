@@ -40,6 +40,7 @@ It's a personal notebook, kept public in case it's useful to others interested i
 | `tasks/<task>/taxonomy.json` | Subcategories: definition, use cases, example models, tag signals. Source of truth. |
 | `scripts/sync_hf_datasets.py` | Pushes a task's taxonomy, queue and seed labels to the Hub datasets. |
 | `space/` | Annotation Space app (Gradio). |
+| `scripts/build_hub_tags.py`, `hub-tags/` | Hub-wide tag inventory, published as `danielrosehill/HF-Model-Tags` (`hub-tags/out/` is gitignored). |
 | `.claude/skills/task-taxonomy/` | Repo-level Claude Code skill for adding subcategories. |
 
 ## On the Hub
@@ -59,4 +60,6 @@ Checked 2026-11-15, both updated daily:
 
 ## Freeform tags as evidence
 
-Model authors' own tags are a classification already, if a noisy one. The API returns them in each model's `tags` list, and the website's `?other=<tag>` filter corresponds to `GET /api/models?filter=<tag>` (case-sensitive; `other=Voice Conversion` and `filter=voice-conversion` are different tags). `GET /api/models-tags-by-type` lists only curated tags (8 under `other`), not freeform ones, so the full vocabulary has to be aggregated from model records. In the audio-to-audio snapshot: 1,417 distinct freeform tags, 816 of them used by only one model.
+Model authors' own tags are a classification already, if a noisy one. Each model's API record has them in its `tags` list. The website's `?other=<tag>` filter corresponds to `GET /api/models?filter=<tag>` (exact and case-sensitive: `voice-conversion` 209 models, `Voice Conversion` 19). The API **silently ignores** an `other=` parameter and returns unfiltered models (checked 2026-11-15; an earlier version of this README got this wrong). `GET /api/models-tags-by-type` lists only the official tag vocabulary (languages, libraries, licenses, pipeline tags, 8 `other` tags), so freeform tags have to be aggregated from model records.
+
+That aggregation is published as [`danielrosehill/HF-Model-Tags`](https://huggingface.co/datasets/danielrosehill/HF-Model-Tags): every distinct tag on the Hub on 2026-11-15 (456,200 tags over 3,239,126 models; 135,741 freeform), each with its model count, downloads, official type and most common pipeline tag, plus a `freeform_folded` config that merges spellings (`voice-conversion` / `Voice Conversion` / `VoiceConversion` and three more: 241 models). Built by `scripts/build_hub_tags.py` on a Google Colab CPU VM (about a minute; via the private `data-notebooks` route on the home server). The dataset card is `hub-tags/README.dataset.md`.
