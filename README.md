@@ -24,5 +24,5 @@ No auth, stdlib only. Notes for whoever runs it next:
 - Endpoint: `GET https://huggingface.co/api/models?pipeline_tag=audio-to-audio&limit=1000&expand[]=...`. Pagination is cursor-based through the `Link: <...>; rel="next"` response header; there is no total-count field in the API response.
 - Passing an unknown `expand[]` value returns a 400 listing the accepted values; that is how the `EXPAND` list in the script was built. If HF adds fields, run once with a bogus value to see the new list.
 - `downloads` is the last 30 days; `downloadsAllTime` is the lifetime count.
-- `createdAt` is the repo creation date, the nearest thing the API has to a release date. For repos older than 2022 it can be a backfilled value.
+- `createdAt` is the repo creation date, the nearest thing the API has to a release date. Repos that predate HF tracking it carry the placeholder `2022-03-02T23:29:...` (56 models in the 2026-11-15 snapshot); treat that date as "on or before March 2022", not a release date.
 - Languages come from the model card's `language` field, not tags (short tags like `rvc`/`svc` look like ISO codes).
