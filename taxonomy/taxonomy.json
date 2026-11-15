@@ -3,7 +3,150 @@
     "description": "Unofficial taxonomy of Hugging Face audio-to-audio models (pipeline_tag=audio-to-audio). Subcategories are defined by use case, not by HF's task label.",
     "snapshot": "data/models.json (fetched 2026-11-15T16:43Z)",
     "started": "2026-11-15",
-    "updated": "2026-11-15"
+    "updated": "2026-11-15",
+    "signal_count_note": "signal_count = snapshot models with at least one listed tag (case-insensitive). An estimate: tags are self-reported, and the signals overlap."
   },
-  "subcategories": []
+  "subcategories": [
+    {
+      "id": "speech-restoration",
+      "name": "Speech restoration (universal cleanup)",
+      "parent": null,
+      "definition": "Degraded speech in, clean speech out, recovering lost signal instead of only subtracting noise. The user's framing: a predictive approach that improves the audio, where older reductive denoisers lose speaker fidelity.",
+      "use_cases": [
+        "Making TTS training data from imperfect speech recordings (the user's own use in experimental TTS work)",
+        "General cleanup: noisy background recordings, poor microphones"
+      ],
+      "signals": [
+        "tags: universal speech enhancement, universal-speech-enhancement, speech-restoration, audio-restoration, restoration"
+      ],
+      "signal_count": 48,
+      "examples": [
+        {
+          "id": "nvidia/NVIDIA-NemotronLabs-RE-USE",
+          "in_snapshot": true,
+          "note": "Canonical example. Mamba-SSM based universal speech enhancement, language-agnostic, multiple input sample rates. 56,656 all-time downloads.",
+          "added": "2026-11-15"
+        }
+      ],
+      "added": "2026-11-15",
+      "notes": "Overlaps speech-enhancement: RE-USE also carries the speech-enhancement tag. The line between the two is restoration (predictive/generative) vs suppression (subtractive); metadata alone doesn't separate them."
+    },
+    {
+      "id": "target-speaker-extraction",
+      "name": "Speaker isolation (target speaker extraction)",
+      "parent": null,
+      "definition": "Mixed audio in, only the target speaker out, removing other voices as well as noise. Narrower than general cleanup; replaces earlier cruder heuristic approaches.",
+      "use_cases": [
+        "Ancillary gate for ASR alongside VAD: isolate the intended dictation audio from background speech and noise",
+        "Front end for speech-to-text-to-speech pipelines"
+      ],
+      "signals": [
+        "tags: target-speaker-extraction, speaker-extraction, voice-isolation, personalized-speech-enhancement, background-voice-removal"
+      ],
+      "signal_count": 15,
+      "examples": [
+        {
+          "id": "arbazsiddiqui/voxlock",
+          "in_snapshot": true,
+          "note": "Canonical example. ONNX, streaming; tagged for voice agents, telephony, call centres. 2,615 all-time downloads.",
+          "added": "2026-11-15"
+        }
+      ],
+      "added": "2026-11-15",
+      "notes": "Also tagged speech-enhancement, so it shows up in that signal too. Read 'VAC' in the dictated brief as VAD (voice activity detection)."
+    },
+    {
+      "id": "speech-enhancement",
+      "name": "Speech enhancement and denoising",
+      "parent": null,
+      "definition": "General-purpose speech improvement: noise suppression, denoising, dereverberation.",
+      "use_cases": [
+        "General audio improvement for speech (podcasts, calls, on-device)"
+      ],
+      "signals": [
+        "tags: speech-enhancement, speech-denoising, noise-suppression, denoising, noise-reduction, dereverberation"
+      ],
+      "signal_count": 183,
+      "examples": [
+        {
+          "id": "desert-ant-labs/clear",
+          "in_snapshot": true,
+          "note": "Canonical example of a model built for general-purpose audio improvement. TFLite/ONNX/Core ML, on-device iOS and Android. 4,180 all-time downloads.",
+          "added": "2026-11-15"
+        }
+      ],
+      "added": "2026-11-15",
+      "notes": "Broadest tag signal; its 183 includes members of speech-restoration and target-speaker-extraction, which also use the speech-enhancement tag."
+    },
+    {
+      "id": "stem-separation",
+      "name": "Stem separation",
+      "parent": null,
+      "definition": "A music mix in, separate stems out (vocals, drums, bass, other).",
+      "use_cases": [
+        "Music source separation"
+      ],
+      "signals": [
+        "tags: music-source-separation, stem-separation, source-separation, music-separation, demucs, htdemucs"
+      ],
+      "signal_count": 153,
+      "examples": [
+        {
+          "id": "iBoostAI/Demucs-v4",
+          "in_snapshot": true,
+          "note": "Demucs is the canonical stem separator. This repo has 0 all-time downloads in the snapshot.",
+          "added": "2026-11-15"
+        }
+      ],
+      "added": "2026-11-15",
+      "notes": "No Meta/facebook Demucs repo is in the audio-to-audio snapshot. The most-downloaded Demucs repos are conversions: MansfieldPlumbing/Demucs_v4_TRT (3,361), cstr/htdemucs-GGUF (2,487), dexxdean/htdemucs-coreml (1,352). The tag signal also catches non-music source separation."
+    },
+    {
+      "id": "instruction-guided-audio-editing",
+      "name": "Instruction-guided audio editing",
+      "parent": null,
+      "definition": "Audio plus a natural-language instruction in, edited audio out. The user flags this as a very unusual entry in the category.",
+      "use_cases": [
+        "Editing audio by instruction"
+      ],
+      "signals": [
+        "tags: audio-editing (exact, 1 model)",
+        "any tag containing 'edit' (7 models)"
+      ],
+      "signal_count": 7,
+      "examples": [
+        {
+          "id": "GeWu-Lab/SteerSound",
+          "in_snapshot": true,
+          "note": "Canonical example. PyTorch, flow matching. 121 all-time downloads.",
+          "added": "2026-11-15"
+        }
+      ],
+      "added": "2026-11-15",
+      "notes": "Other candidates from the looser signal: heng1024/AnchorSteer-weights, mimbres/spansynth-edit, mlx-community/Step-Audio-EditX-8bit / -bf16, nijta/acoustic-token-admixture, OpenRB-Lab/AURA. Not yet checked."
+    },
+    {
+      "id": "voice-conversion",
+      "name": "Voice conversion",
+      "parent": null,
+      "definition": "Speech or singing in one voice in, the same content in another voice out.",
+      "use_cases": [
+        "Voice conversion"
+      ],
+      "signals": [
+        "tags: rvc, vc, voice conversion, voice-conversion, voice2voice, svc, singing-voice-conversion, so-vits-svc, seed-vc"
+      ],
+      "signal_count": 399,
+      "examples": [
+        {
+          "id": "IAHispano/Applio",
+          "in_snapshot": true,
+          "note": "Canonical example. RVC/VITS based; ships ONNX. 1,895 all-time downloads.",
+          "added": "2026-11-15"
+        }
+      ],
+      "added": "2026-11-15",
+      "notes": "Largest subcategory by tag signal. Includes singing voice conversion (svc tags), which could become a child subcategory."
+    }
+  ]
 }

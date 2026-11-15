@@ -15,6 +15,8 @@ That work led me to audio-to-audio, which is getting interesting, especially the
 
 My view is that Hugging Face's task labels, each one a traditionally delineated ML task, hide a whole world of very different use cases underneath. `audio-to-audio` is one label covering singing-voice conversion, speech enhancement, music stem separation, codecs and much more, and those have little in common beyond audio going in and audio coming out.
 
+I keep a lot of Hugging Face collections, but they're mostly for my own use: whenever I look for models for a specific task, I end up with my own informal ways of breaking the task down. This repo writes that breakdown down.
+
 So this repo is:
 
 1. **A one-time import** of every audio-to-audio model on the Hub (Step 1 below).
@@ -52,5 +54,14 @@ No auth, stdlib only. Notes for whoever runs it next:
 `taxonomy/taxonomy.json` holds the subcategories, each with a definition, use cases, example models and the metadata signals (tags, library) that identify its members. Entries are added with the repo-level Claude Code skill [`.claude/skills/a2a-taxonomy/SKILL.md`](.claude/skills/a2a-taxonomy/SKILL.md): name a subcategory and give example models, and the skill resolves them against `data/models.json`, writes the entry and regenerates the table below.
 
 <!-- taxonomy:start -->
-_No subcategories yet._
+| Subcategory | Definition | Examples | Tag-signal matches |
+|---|---|---|---|
+| Speech restoration (universal cleanup) | Degraded speech in, clean speech out, recovering lost signal instead of only subtracting noise. The user's framing: a predictive approach that improves the audio, where older reductive denoisers lose speaker fidelity. | [`nvidia/NVIDIA-NemotronLabs-RE-USE`](https://huggingface.co/nvidia/NVIDIA-NemotronLabs-RE-USE) | 48 |
+| Speaker isolation (target speaker extraction) | Mixed audio in, only the target speaker out, removing other voices as well as noise. Narrower than general cleanup; replaces earlier cruder heuristic approaches. | [`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock) | 15 |
+| Speech enhancement and denoising | General-purpose speech improvement: noise suppression, denoising, dereverberation. | [`desert-ant-labs/clear`](https://huggingface.co/desert-ant-labs/clear) | 183 |
+| Stem separation | A music mix in, separate stems out (vocals, drums, bass, other). | [`iBoostAI/Demucs-v4`](https://huggingface.co/iBoostAI/Demucs-v4) | 153 |
+| Instruction-guided audio editing | Audio plus a natural-language instruction in, edited audio out. The user flags this as a very unusual entry in the category. | [`GeWu-Lab/SteerSound`](https://huggingface.co/GeWu-Lab/SteerSound) | 7 |
+| Voice conversion | Speech or singing in one voice in, the same content in another voice out. | [`IAHispano/Applio`](https://huggingface.co/IAHispano/Applio) | 399 |
+
+Match counts are estimates (models carrying at least one of the subcategory's tags) and overlap. Details in `taxonomy/taxonomy.json`.
 <!-- taxonomy:end -->
