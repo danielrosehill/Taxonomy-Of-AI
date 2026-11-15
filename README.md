@@ -1,6 +1,6 @@
-# HF-A2A-Analysis
+# Taxonomy of AI
 
-Analysis of the **audio-to-audio** models on Hugging Face (`pipeline_tag=audio-to-audio`, the set listed at <https://huggingface.co/models?pipeline_tag=audio-to-audio>).
+My own classification of AI models on Hugging Face, task by task. The Hub sorts models by `pipeline_tag`; I sort them by what they are actually for. It's a personal taxonomy, and no one else has to agree with it.
 
 ## Why this exists (written 2026-11-15)
 
@@ -11,57 +11,52 @@ I've been interested in ASR and dictation for a long time, and I've been fine-tu
 - [Hebrish](https://huggingface.co/Hebrish): Parakeet fine-tunes for English spoken with Hebrew-speaker accents and Hebrew-English code-switching.
 - [Fritter](https://huggingface.co/danielrosehill/Fritter): a Parakeet TDT 0.6B v2 fine-tune for English tech dictation ([demo](https://huggingface.co/spaces/danielrosehill/Fritter-Demo)).
 
-That work led me to audio-to-audio, which is getting interesting, especially the small accessory models that sit around an ASR or voice pipeline: denoising, enhancement, separation, voice conversion and so on.
+That work led me to audio-to-audio, the first task here, which is getting interesting, especially the small accessory models that sit around an ASR or voice pipeline: denoising, enhancement, separation, voice conversion and so on.
 
 My view is that Hugging Face's task labels, each one a traditionally delineated ML task, hide a whole world of very different use cases underneath. `audio-to-audio` is one label covering singing-voice conversion, speech enhancement, music stem separation, codecs and much more, and those have little in common beyond audio going in and audio coming out.
 
 I keep a lot of Hugging Face collections, but they're mostly for my own use: whenever I look for models for a specific task, I end up with my own informal ways of breaking the task down. This repo writes that breakdown down.
 
-So this repo is:
+So this project is:
 
-1. **A one-time import** of every audio-to-audio model on the Hub (Step 1 below).
-2. **An unofficial taxonomy**, built with Claude: I give examples of what I see as the canonical subcategories and Claude records them against the snapshot (Step 2 below).
+1. **A snapshot per task** of every model the Hub lists under that `pipeline_tag` (`tasks/<task>/data/`).
+2. **An unofficial taxonomy per task**, built with Claude: I give examples of what I see as the canonical subcategories, and Claude records them against the snapshot (`tasks/<task>/taxonomy.json`).
+3. **Labels**, model by model, from a private annotation Space.
+4. **Later, a classifier** trained on those labels, so new models can be sorted by my rubric automatically.
 
-It's a personal notebook, kept public in case it's useful to others interested in audio-to-audio or one of its specific tasks.
+It's a personal notebook, kept public in case it's useful to others interested in these tasks.
 
-## Step 1: model inventory (done 2026-11-15)
+## Tasks
 
-`data/` holds a snapshot of every audio-to-audio model's metadata from the public Hub API.
-
-| File | Contents |
-|---|---|
-| `data/models.json` | `{meta, models}`: full API record per model, with every `expand[]` field the endpoint accepts (card data, config, tags, siblings/files, spaces, safetensors params, downloads, likes, dates, gating, inference providers, ...). `meta.fetched_at` is the snapshot time. |
-| `data/models.csv` | One row per model: id, author, created_at, last_modified, downloads_30d, downloads_all_time, likes, trending_score, library_name, license, languages (from model card), base_models, arxiv, gated, disabled, params (safetensors total), file_count, spaces_count, tags. |
-
-Snapshot 2026-11-15T16:43Z: **1,887 models**, equal to the `numTotalItems` the website reports for the same filter (verified).
-
-### Refresh
-
-```bash
-uv run scripts/fetch_models.py
-```
-
-No auth, stdlib only. Notes for whoever runs it next:
-
-- Endpoint: `GET https://huggingface.co/api/models?pipeline_tag=audio-to-audio&limit=1000&expand[]=...`. Pagination is cursor-based through the `Link: <...>; rel="next"` response header; there is no total-count field in the API response.
-- Passing an unknown `expand[]` value returns a 400 listing the accepted values; that is how the `EXPAND` list in the script was built. If HF adds fields, run once with a bogus value to see the new list.
-- `downloads` is the last 30 days; `downloadsAllTime` is the lifetime count.
-- `createdAt` is the repo creation date, the nearest thing the API has to a release date. Repos that predate HF tracking it carry the placeholder `2022-03-02T23:29:...` (56 models in the 2026-11-15 snapshot); treat that date as "on or before March 2022", not a release date.
-- Languages come from the model card's `language` field, not tags (short tags like `rvc`/`svc` look like ISO codes).
-
-## Step 2: unofficial taxonomy (started 2026-11-15)
-
-`taxonomy/taxonomy.json` holds the subcategories, each with a definition, use cases, example models and the metadata signals (tags, library) that identify its members. Entries are added with the repo-level Claude Code skill [`.claude/skills/a2a-taxonomy/SKILL.md`](.claude/skills/a2a-taxonomy/SKILL.md): name a subcategory and give example models, and the skill resolves them against `data/models.json`, writes the entry and regenerates the table below.
-
-<!-- taxonomy:start -->
-| Subcategory | Definition | Examples | Tag-signal matches |
+| Task | Snapshot | Subcategories | Notes |
 |---|---|---|---|
-| Speech restoration (universal cleanup) | Degraded speech in, clean speech out, recovering lost signal instead of only subtracting noise. The user's framing: a predictive approach that improves the audio, where older reductive denoisers lose speaker fidelity. | [`nvidia/NVIDIA-NemotronLabs-RE-USE`](https://huggingface.co/nvidia/NVIDIA-NemotronLabs-RE-USE) | 48 |
-| Speaker isolation (target speaker extraction) | Mixed audio in, only the target speaker out, removing other voices as well as noise. Narrower than general cleanup; replaces earlier cruder heuristic approaches. | [`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock) | 15 |
-| Speech enhancement and denoising | General-purpose speech improvement: noise suppression, denoising, dereverberation. | [`desert-ant-labs/clear`](https://huggingface.co/desert-ant-labs/clear) | 183 |
-| Stem separation | A music mix in, separate stems out (vocals, drums, bass, other). | [`iBoostAI/Demucs-v4`](https://huggingface.co/iBoostAI/Demucs-v4) | 153 |
-| Instruction-guided audio editing | Audio plus a natural-language instruction in, edited audio out. The user flags this as a very unusual entry in the category. | [`GeWu-Lab/SteerSound`](https://huggingface.co/GeWu-Lab/SteerSound) | 7 |
-| Voice conversion | Speech or singing in one voice in, the same content in another voice out. | [`IAHispano/Applio`](https://huggingface.co/IAHispano/Applio) | 399 |
+| [audio-to-audio](tasks/audio-to-audio/README.md) | 1,887 models, 2026-11-15 | 6 | first task |
 
-Match counts are estimates (models carrying at least one of the subcategory's tags) and overlap. Details in `taxonomy/taxonomy.json`.
-<!-- taxonomy:end -->
+## Layout
+
+| Path | What |
+|---|---|
+| `tasks/<task>/data/models.json`, `models.csv` | Hub snapshot for the task (`uv run scripts/fetch_task_models.py <task>`). |
+| `tasks/<task>/taxonomy.json` | Subcategories: definition, use cases, example models, tag signals. Source of truth. |
+| `scripts/sync_hf_datasets.py` | Pushes a task's taxonomy, queue and seed labels to the Hub datasets. |
+| `space/` | Annotation Space app (Gradio). |
+| `.claude/skills/task-taxonomy/` | Repo-level Claude Code skill for adding subcategories. |
+
+## On the Hub
+
+| Repo | Visibility | Contents |
+|---|---|---|
+| [`danielrosehill/Taxonomy-Of-AI`](https://huggingface.co/datasets/danielrosehill/Taxonomy-Of-AI) | public dataset | `taxonomy/<task>.json`, `labels/<task>.seed.jsonl`, reviewed labels as they're exported |
+| `danielrosehill/Taxonomy-Of-AI-Working` | private dataset | `queue/<task>.jsonl` (models to label, most downloaded first, with tag-based suggestions), `annotations/` from the Space |
+| `danielrosehill/Taxonomy-Of-AI-Annotator` | private Space | one model at a time with its card, one button per subcategory |
+
+## Hub-wide sources (for later tasks and the classifier)
+
+Checked 2026-11-15, both updated daily:
+
+- [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats): `models.parquet` with metadata, including tags, for every model on the Hub (1.7 GB, so process it off-laptop).
+- [`librarian-bots/model_cards_with_metadata`](https://huggingface.co/datasets/librarian-bots/model_cards_with_metadata): model card text plus metadata, 6 parquet shards.
+
+## Freeform tags as evidence
+
+Model authors' own tags are a classification already, if a noisy one. The API returns them in each model's `tags` list, and the website's `?other=<tag>` filter corresponds to `GET /api/models?filter=<tag>` (case-sensitive; `other=Voice Conversion` and `filter=voice-conversion` are different tags). `GET /api/models-tags-by-type` lists only curated tags (8 under `other`), not freeform ones, so the full vocabulary has to be aggregated from model records. In the audio-to-audio snapshot: 1,417 distinct freeform tags, 816 of them used by only one model.

@@ -1,10 +1,11 @@
 {
   "meta": {
     "description": "Unofficial taxonomy of Hugging Face audio-to-audio models (pipeline_tag=audio-to-audio). Subcategories are defined by use case, not by HF's task label.",
-    "snapshot": "data/models.json (fetched 2026-11-15T16:43Z)",
+    "snapshot": "tasks/audio-to-audio/data/models.json (fetched 2026-11-15T16:43Z)",
     "started": "2026-11-15",
     "updated": "2026-11-15",
-    "signal_count_note": "signal_count = snapshot models with at least one listed tag (case-insensitive). An estimate: tags are self-reported, and the signals overlap."
+    "signal_count_note": "signal_count = snapshot models with at least one listed tag (case-insensitive). An estimate: tags are self-reported, and the signals overlap.",
+    "task": "audio-to-audio"
   },
   "subcategories": [
     {
@@ -29,7 +30,14 @@
         }
       ],
       "added": "2026-11-15",
-      "notes": "Overlaps speech-enhancement: RE-USE also carries the speech-enhancement tag. The line between the two is restoration (predictive/generative) vs suppression (subtractive); metadata alone doesn't separate them."
+      "notes": "Overlaps speech-enhancement: RE-USE also carries the speech-enhancement tag. The line between the two is restoration (predictive/generative) vs suppression (subtractive); metadata alone doesn't separate them.",
+      "signal_tags": [
+        "universal speech enhancement",
+        "universal-speech-enhancement",
+        "speech-restoration",
+        "audio-restoration",
+        "restoration"
+      ]
     },
     {
       "id": "target-speaker-extraction",
@@ -53,7 +61,14 @@
         }
       ],
       "added": "2026-11-15",
-      "notes": "Also tagged speech-enhancement, so it shows up in that signal too. Read 'VAC' in the dictated brief as VAD (voice activity detection)."
+      "notes": "Also tagged speech-enhancement, so it shows up in that signal too. Read 'VAC' in the dictated brief as VAD (voice activity detection).",
+      "signal_tags": [
+        "target-speaker-extraction",
+        "speaker-extraction",
+        "voice-isolation",
+        "personalized-speech-enhancement",
+        "background-voice-removal"
+      ]
     },
     {
       "id": "speech-enhancement",
@@ -76,7 +91,15 @@
         }
       ],
       "added": "2026-11-15",
-      "notes": "Broadest tag signal; its 183 includes members of speech-restoration and target-speaker-extraction, which also use the speech-enhancement tag."
+      "notes": "Broadest tag signal; its 183 includes members of speech-restoration and target-speaker-extraction, which also use the speech-enhancement tag.",
+      "signal_tags": [
+        "speech-enhancement",
+        "speech-denoising",
+        "noise-suppression",
+        "denoising",
+        "noise-reduction",
+        "dereverberation"
+      ]
     },
     {
       "id": "stem-separation",
@@ -99,7 +122,15 @@
         }
       ],
       "added": "2026-11-15",
-      "notes": "No Meta/facebook Demucs repo is in the audio-to-audio snapshot. The most-downloaded Demucs repos are conversions: MansfieldPlumbing/Demucs_v4_TRT (3,361), cstr/htdemucs-GGUF (2,487), dexxdean/htdemucs-coreml (1,352). The tag signal also catches non-music source separation."
+      "notes": "No Meta/facebook Demucs repo is in the audio-to-audio snapshot. The most-downloaded Demucs repos are conversions: MansfieldPlumbing/Demucs_v4_TRT (3,361), cstr/htdemucs-GGUF (2,487), dexxdean/htdemucs-coreml (1,352). The tag signal also catches non-music source separation.",
+      "signal_tags": [
+        "music-source-separation",
+        "stem-separation",
+        "source-separation",
+        "music-separation",
+        "demucs",
+        "htdemucs"
+      ]
     },
     {
       "id": "instruction-guided-audio-editing",
@@ -123,7 +154,10 @@
         }
       ],
       "added": "2026-11-15",
-      "notes": "Other candidates from the looser signal: heng1024/AnchorSteer-weights, mimbres/spansynth-edit, mlx-community/Step-Audio-EditX-8bit / -bf16, nijta/acoustic-token-admixture, OpenRB-Lab/AURA. Not yet checked."
+      "notes": "Other candidates from the looser signal: heng1024/AnchorSteer-weights, mimbres/spansynth-edit, mlx-community/Step-Audio-EditX-8bit / -bf16, nijta/acoustic-token-admixture, OpenRB-Lab/AURA. Not yet checked.",
+      "signal_tags": [
+        "audio-editing"
+      ]
     },
     {
       "id": "voice-conversion",
@@ -146,7 +180,18 @@
         }
       ],
       "added": "2026-11-15",
-      "notes": "Largest subcategory by tag signal. Includes singing voice conversion (svc tags), which could become a child subcategory."
+      "notes": "Largest subcategory by tag signal. Includes singing voice conversion (svc tags), which could become a child subcategory.",
+      "signal_tags": [
+        "rvc",
+        "vc",
+        "voice conversion",
+        "voice-conversion",
+        "voice2voice",
+        "svc",
+        "singing-voice-conversion",
+        "so-vits-svc",
+        "seed-vc"
+      ]
     }
   ]
 }

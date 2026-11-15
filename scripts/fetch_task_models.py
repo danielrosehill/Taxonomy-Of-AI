@@ -2,19 +2,21 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Fetch every Hugging Face model with pipeline_tag=audio-to-audio.
+"""Fetch every Hugging Face model with a given pipeline_tag (default audio-to-audio).
+
+Usage: uv run scripts/fetch_task_models.py [pipeline_tag]
 
 Source: GET https://huggingface.co/api/models (public, no auth).
 Paginates via the RFC 5988 `Link: <...>; rel="next"` header (cursor-based).
 Writes:
-  data/models.json  full API records (every expand[] field the API accepts)
-  data/models.csv   flat summary, one row per model
+  tasks/<pipeline_tag>/data/models.json  full API records (every expand[] field the API accepts)
+  tasks/<pipeline_tag>/data/models.csv   flat summary, one row per model
 """
 import csv, json, re, sys, urllib.parse, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-PIPELINE = "audio-to-audio"
+PIPELINE = sys.argv[1] if len(sys.argv) > 1 else "audio-to-audio"
 # All values the endpoint accepted for expand[] as of 2026-11-15.
 EXPAND = ["author", "baseModels", "cardData", "config", "createdAt", "disabled",
           "downloads", "downloadsAllTime", "evalResults", "gated", "inference",
@@ -22,7 +24,7 @@ EXPAND = ["author", "baseModels", "cardData", "config", "createdAt", "disabled",
           "mask_token", "model-index", "pipeline_tag", "private", "safetensors",
           "sha", "siblings", "spaces", "tags", "transformersInfo", "trendingScore",
           "widgetData", "gguf", "resourceGroup", "xetEnabled"]
-OUT = Path(__file__).resolve().parent.parent / "data"
+OUT = Path(__file__).resolve().parent.parent / "tasks" / PIPELINE / "data"
 
 
 def fetch_all():
@@ -51,7 +53,7 @@ def langs(m):
 
 def main():
     models = sorted(fetch_all(), key=lambda m: m["id"].lower())
-    OUT.mkdir(exist_ok=True)
+    OUT.mkdir(parents=True, exist_ok=True)
     meta = {"fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "pipeline_tag": PIPELINE, "count": len(models)}
     (OUT / "models.json").write_text(json.dumps({"meta": meta, "models": models},
