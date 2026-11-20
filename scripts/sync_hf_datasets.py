@@ -37,7 +37,8 @@ for m in sorted(models, key=lambda m: -(m.get("downloadsAllTime") or 0)):
     card = m.get("cardData") or {}
     queue.append({
         "model_id": m["id"], "task": task,
-        "downloads_all_time": m.get("downloadsAllTime") or 0, "likes": m.get("likes") or 0,
+        "downloads_all_time": m.get("downloadsAllTime") or 0, "downloads_30d": m.get("downloads") or 0,
+        "likes": m.get("likes") or 0, "trending_score": m.get("trendingScore") or 0,
         "created_at": m.get("createdAt"), "library_name": m.get("library_name") or card.get("library_name"),
         "license": card.get("license"), "tags": [t for t in m.get("tags", []) if ":" not in t],
         "suggested": suggestions(m.get("tags", [])),
@@ -83,10 +84,12 @@ pretty_name: Taxonomy of AI (working)
 
 Annotation workspace behind `danielrosehill/Taxonomy-Of-AI`.
 
-- `queue/<task>.jsonl`: models to label, most-downloaded first, with tag-signal `suggested` subcategories.
+- `queue/<task>.jsonl`: models to label, most-downloaded first, with tag-signal `suggested` subcategories
+  (downloads all time and 30 days, likes, trending score, all from the task snapshot).
 - `taxonomy/<task>.json`: categories shown as buttons in the annotation Space.
-- `annotations/*.jsonl`: written by the Space `danielrosehill/Taxonomy-Of-AI-Annotator` (append-only;
-  the latest record per `model_id` wins).
+- `annotations/*.jsonl`: subcategory labels exported from Label Studio by `scripts/ls_export.py` (append-only;
+  the latest record per `model_id` wins). Review notes from the Space `danielrosehill/Taxonomy-Of-AI-Annotator`
+  go to `danielrosehill/Taxonomy-Of-AI-Voice-Notes`.
 
 Pushed by `scripts/sync_hf_datasets.py` in <https://github.com/danielrosehill/Taxonomy-Of-AI>.
 """

@@ -19,6 +19,10 @@ for existing ones, moves, and asides. Read `task-taxonomy` first: its schema, fi
   (not in this public repo): `uv run scripts/voice_note.py add <audio> --transcript <txt> --task <task> --slug <short-name> --asr <model>`.
   It prints the note `id` (`YYYY-MM-DD_<slug>`). After step 4, record what it became:
   `uv run scripts/voice_note.py processed <id> <subcategory id> ...`.
+- **Review Space notes** ("process my review notes"): already transcribed and structured in
+  `reviews/*.jsonl` of `danielrosehill/Taxonomy-Of-AI-Voice-Notes` (README "Review notes"). Use rows with
+  `status: noted`; `note.subcategory` and `note.reasons` are the model's reading of the note, check them against the
+  `transcript`. Don't re-store them with `voice_note.py`.
 - Dictated text has no punctuation and runs ideas together. Say "I read this as ..." where it matters; don't
   call the wording garbled and don't ask the user to repeat it.
 

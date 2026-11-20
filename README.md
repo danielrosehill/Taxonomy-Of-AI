@@ -21,7 +21,7 @@ So this project is:
 
 1. **A snapshot per task** of every model the Hub lists under that `pipeline_tag` (`tasks/<task>/data/`).
 2. **An unofficial taxonomy per task**, built with Claude: I give examples of what I see as the canonical subcategories, and Claude records them against the snapshot (`tasks/<task>/taxonomy.json`).
-3. **Labels**, model by model, in Carrot Cake Lab (Label Studio project 34, since 2026-11-15; the `space/` annotator was never deployed).
+3. **Labels**, model by model, in Carrot Cake Lab (Label Studio project 34, since 2026-11-15), and **spoken review notes** in the review Space (`space/`, since 2026-11-20).
 4. **Later, a classifier** trained on those labels, so new models can be sorted by my rubric automatically.
 
 It's a personal notebook, kept public in case it's useful to others interested in these tasks.
@@ -39,7 +39,7 @@ It's a personal notebook, kept public in case it's useful to others interested i
 | `tasks/<task>/data/models.json`, `models.csv` | Hub snapshot for the task (`uv run scripts/fetch_task_models.py <task>`). |
 | `tasks/<task>/taxonomy.json` | Subcategories: definition, use cases, example models, tag signals. Source of truth. |
 | `scripts/sync_hf_datasets.py` | Pushes a task's taxonomy, queue and seed labels to the Hub datasets. |
-| `space/` | Annotation Space app (Gradio). Not deployed; its queue, labels and record format now run in Label Studio. |
+| `space/` | Review Space (FastAPI + one HTML page, Docker): go through a task's models, record a spoken note or mark reviewed. See "Review notes" below. |
 | `scripts/ls_build_tasks.py`, `scripts/ls_export.py` | Queue -> Label Studio tasks; Label Studio labels -> `annotations/` (see below). |
 | `scripts/build_hub_tags.py`, `hub-tags/` | Hub-wide tag inventory, published as `danielrosehill/HF-Model-Tags` (`hub-tags/out/` is gitignored). |
 | `scripts/dedup_hub_tags.py` | Second-pass tag dedup: `tags.parquet` -> `tag_groups.parquet` (fold, official, stem merges). Local, ~8 s. |
@@ -55,7 +55,34 @@ It's a personal notebook, kept public in case it's useful to others interested i
 |---|---|---|
 | [`danielrosehill/Taxonomy-Of-AI`](https://huggingface.co/datasets/danielrosehill/Taxonomy-Of-AI) | public dataset | `taxonomy/<task>.json`, `labels/<task>.seed.jsonl`, reviewed labels as they're exported |
 | `danielrosehill/Taxonomy-Of-AI-Working` | private dataset | `queue/<task>.jsonl` (models to label, most downloaded first, with tag-based suggestions), `annotations/` (Space record format; written by `scripts/ls_export.py`) |
-| `danielrosehill/Taxonomy-Of-AI-Annotator` | private Space | one model at a time with its card, one button per subcategory |
+| `danielrosehill/Taxonomy-Of-AI-Voice-Notes` | private dataset | voice notes: `reviews/` from the Space, `notes.jsonl` from `scripts/voice_note.py`, audio and raw transcripts |
+| `danielrosehill/Taxonomy-Of-AI-Annotator` | private Space | the review Space (`space/`) |
+
+## Review notes (since 2026-11-20)
+
+Private Space [`danielrosehill/Taxonomy-Of-AI-Annotator`](https://huggingface.co/spaces/danielrosehill/Taxonomy-Of-AI-Annotator)
+(open it from huggingface.co while logged in; the `*.hf.space` URL wants a token). Source `space/`.
+
+- Left: the task's models (queue from `Taxonomy-Of-AI-Working`, plus models newer than the snapshot), with **live** Hub
+  stats fetched at Space startup: sort by trending, downloads 30 d / all time, likes, newest; show not-yet-reviewed,
+  all, reviewed, or with a note; filter by tag-signal subcategory or id/tag text. Right: stats, tags, model card.
+- `r` starts recording, `r` again stops, saves and moves on (`Esc` discards). `n` = **reviewed, no note** (the null
+  review). `j`/`k` next/previous. Restart the Space to refresh the live stats.
+- A note goes to OpenRouter (`NOTE_MODEL`, default `~google/gemini-flash-latest`) as mp3 in **one** call returning
+  JSON: `transcript` (verbatim), `summary`, `verdict` (interesting / not-interesting / neutral), `reasons`,
+  `subcategory` (taxonomy id, `new:<id>` or null, only if spoken), `secondary`, `use_cases`, `mentioned_models`,
+  `follow_up`. Measured 2026-11-20 on a 10 s note: ~5 s, $0.0055 (resolved to `google/gemini-4-hydrogen`).
+- Stored in the private dataset `danielrosehill/Taxonomy-Of-AI-Voice-Notes`: `reviews/<session>.jsonl` (append-only,
+  latest per `(task, model_id)` wins; `status` reviewed / noted / note-failed), `audio/<date>/<id>.webm` (as
+  recorded), `transcripts/<date>/<id>.md`. A CommitScheduler pushes every minute and right after each note. The
+  audio is kept even when transcription fails (`note-failed`, error in `note.error`).
+- Secrets: `HF_TOKEN`, `OPENROUTER_API_KEY` (the 1Password/Infisical `OPENROUTER_TRANSCRIPTION_KEY`). Redeploy:
+  `hf upload danielrosehill/Taxonomy-Of-AI-Annotator space . --repo-type space`.
+- Run locally against a scratch dataset (the app creates it): `VOICE_NOTES_DATASET=<you>/scratch HF_TOKEN=... OPENROUTER_API_KEY=... uv run --with-requirements space/requirements.txt uvicorn app:app --app-dir space`; needs `ffmpeg`.
+
+Verified 2026-11-20: list, live stats, card, reviewed and note endpoints locally and on the deployed Space (API only);
+the note path with a synthetic espeak recording. The browser microphone path (MediaRecorder) is untested until
+first real use.
 
 ## Labelling in Carrot Cake Lab (since 2026-11-15)
 

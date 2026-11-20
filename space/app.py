@@ -1,124 +1,206 @@
-"""Annotation Space for Taxonomy-Of-AI.
+"""Taxonomy of AI review Space: go through a task's models one by one, record a spoken note or mark reviewed.
 
-Shows one model at a time from queue/<task>.jsonl in the private working dataset, with its card,
-and records a subcategory label per click to annotations/ in the same dataset (CommitScheduler, every minute).
-Categories are the buttons from taxonomy/<task>.json; restart the Space after syncing new ones.
-Env: HF_TOKEN (write access to the working dataset), WORKING_DATASET, TASK.
+GET  /                      the page (index.html)
+GET  /api/tasks             tasks with a queue in the working dataset
+GET  /api/models?task=      models of the task (live Hub stats merged over the queue) + subcategories + reviews
+GET  /api/card?model=       model card markdown (front matter stripped, truncated)
+POST /api/review            JSON {model_id, task}: null review ("looked at it, nothing to say")
+POST /api/note              multipart {model_id, task, audio}: store audio, transcribe + structure (OpenRouter), store
+
+Storage: private dataset VOICE_NOTES_DATASET (default danielrosehill/Taxonomy-Of-AI-Voice-Notes)
+  reviews/<session file>.jsonl     one record per action, append-only; the latest record per (task, model_id) wins
+  audio/<YYYY-MM-DD>/<id>.webm     the recording as the browser sent it
+  transcripts/<YYYY-MM-DD>/<id>.md raw transcript with front matter
+Uploaded by a CommitScheduler (every minute; a note triggers an immediate push).
+
+Env/secrets: HF_TOKEN (read working dataset, write voice-notes dataset), OPENROUTER_API_KEY,
+  NOTE_MODEL (default ~google/gemini-flash-latest), WORKING_DATASET, VOICE_NOTES_DATASET, ANNOTATOR.
 """
-import json, os, re, uuid
+import base64, json, os, re, subprocess, tempfile, threading, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import gradio as gr
-from huggingface_hub import CommitScheduler, hf_hub_download, snapshot_download
+import httpx
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from huggingface_hub import CommitScheduler, HfApi, hf_hub_download, snapshot_download
 
 TOKEN = os.environ["HF_TOKEN"]
+OR_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+NOTE_MODEL = os.environ.get("NOTE_MODEL", "~google/gemini-flash-latest")
 WORKING = os.environ.get("WORKING_DATASET", "danielrosehill/Taxonomy-Of-AI-Working")
-TASK = os.environ.get("TASK", "audio-to-audio")
+NOTES = os.environ.get("VOICE_NOTES_DATASET", "danielrosehill/Taxonomy-Of-AI-Voice-Notes")
 ANNOTATOR = os.environ.get("ANNOTATOR", "danielrosehill")
-CARD_CHARS = 8000
+CARD_CHARS = 12000
+api = HfApi(token=TOKEN)
+lock = threading.Lock()
+app = FastAPI()
+read_jl = lambda p: [json.loads(l) for l in Path(p).read_text().splitlines() if l.strip()]
+now = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-local = Path(snapshot_download(WORKING, repo_type="dataset", token=TOKEN,
-                               allow_patterns=[f"queue/{TASK}.jsonl", f"taxonomy/{TASK}.json", "annotations/*"]))
-read_jl = lambda p: [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
-queue = read_jl(local / "queue" / f"{TASK}.jsonl")
-taxonomy = json.loads((local / "taxonomy" / f"{TASK}.json").read_text())
-CATS = [(s["id"], s["name"]) for s in taxonomy["subcategories"]]
-CAT_NAME = dict(CATS)
+work = Path(snapshot_download(WORKING, repo_type="dataset", token=TOKEN, allow_patterns=["queue/*", "taxonomy/*"]))
+TASKS = sorted(p.stem for p in (work / "queue").glob("*.jsonl"))
 
-done = {}
-for p in sorted((local / "annotations").glob("*.jsonl")) if (local / "annotations").exists() else []:
+# Earlier reviews: everything already pushed, then this session's file on top.
+reviews: dict[tuple[str, str], dict] = {}
+api.create_repo(NOTES, repo_type="dataset", private=True, exist_ok=True)
+prev = Path(snapshot_download(NOTES, repo_type="dataset", token=TOKEN, allow_patterns=["reviews/*.jsonl"]))
+for p in sorted((prev / "reviews").glob("*.jsonl")) if (prev / "reviews").exists() else []:
     for r in read_jl(p):
-        done[r["model_id"]] = r
+        reviews[(r["task"], r["model_id"])] = r
 
-out_dir = Path("annotations_local"); out_dir.mkdir(exist_ok=True)
-out_file = out_dir / f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}.jsonl"
-scheduler = CommitScheduler(repo_id=WORKING, repo_type="dataset", folder_path=out_dir,
-                            path_in_repo="annotations", every=1, token=TOKEN, private=True)
+upload = Path.home() / "upload"; (upload / "reviews").mkdir(parents=True, exist_ok=True)
+session_file = upload / "reviews" / f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}.jsonl"
+scheduler = CommitScheduler(repo_id=NOTES, repo_type="dataset", folder_path=upload, every=1, token=TOKEN, private=True)
+
+_models: dict[str, dict] = {}
 
 
-def card_text(model_id):
+def task_data(task: str) -> dict:
+    """Queue (snapshot) rows, with live downloads/likes/trending from the Hub merged on top; cached per task."""
+    if task in _models:
+        return _models[task]
+    if task not in TASKS:
+        raise HTTPException(404, f"no queue for {task}")
+    rows = {q["model_id"]: q for q in read_jl(work / "queue" / f"{task}.jsonl")}
+    live_ok = True
     try:
-        p = hf_hub_download(model_id, "README.md", token=TOKEN)
-        t = Path(p).read_text(errors="replace")
-        t = re.sub(r"\A---\n.*?\n---\n", "", t, flags=re.S)
-        return t[:CARD_CHARS] + ("\n\n*(card truncated)*" if len(t) > CARD_CHARS else "") or "*(empty card)*"
-    except Exception as e:
-        return f"*(no model card: {type(e).__name__})*"
+        for m in api.list_models(pipeline_tag=task, expand=["downloads", "downloadsAllTime", "likes", "trendingScore",
+                                                             "createdAt", "tags", "library_name"]):
+            q = rows.setdefault(m.id, {"model_id": m.id, "task": task, "suggested": [], "license": None, "new": True,
+                                       "tags": [t for t in (m.tags or []) if ":" not in t], "library_name": m.library_name,
+                                       "created_at": m.created_at.isoformat() if m.created_at else None})
+            q.update(downloads_30d=m.downloads or 0, downloads_all_time=m.downloads_all_time or 0,
+                     likes=m.likes or 0, trending_score=m.trending_score or 0, live=True)
+    except Exception as e:  # Hub down: fall back to the snapshot numbers
+        live_ok = f"{type(e).__name__}: {e}"[:200]
+    tax = json.loads((work / "taxonomy" / f"{task}.json").read_text())
+    cats = [{"id": s["id"], "name": s["name"]} for s in tax["subcategories"]]
+    _models[task] = {"task": task, "live": live_ok, "loaded_at": now(), "subcategories": cats, "models": list(rows.values())}
+    return _models[task]
 
 
-def next_index(start, only_unlabelled=True):
-    for i in range(start, len(queue)):
-        if not only_unlabelled or queue[i]["model_id"] not in done:
-            return i
-    return None
-
-
-def view(i):
-    n = sum(1 for q in queue if q["model_id"] in done)
-    prog = f"**{n} / {len(queue)} labelled** ({TASK})"
-    if i is None:
-        return i, prog, "## Queue finished", "", "", gr.update(value=[]), ""
-    q = queue[i]
-    mid = q["model_id"]
-    head = (f"## [{mid}](https://huggingface.co/{mid})\n"
-            f"#{i + 1} · downloads (all time) {q['downloads_all_time']:,} · likes {q['likes']} · "
-            f"created {(q['created_at'] or '')[:10]} · library `{q['library_name']}` · license `{q['license']}`")
-    sug = ", ".join(CAT_NAME.get(s, s) for s in q["suggested"]) or "none"
-    prev = done.get(mid)
-    meta = f"**Tag-signal suggestion:** {sug}\n\n**Tags:** {', '.join(q['tags'][:30])}"
-    if prev:
-        meta += f"\n\n**Already labelled:** `{prev['subcategory']}` ({prev['labeled_at'][:10]})"
-    return i, prog, head, meta, card_text(mid), gr.update(value=[]), ""
-
-
-def record(i, subcategory, secondary, notes):
-    if i is None:
-        return view(None)
-    q = queue[i]
-    rec = {"model_id": q["model_id"], "task": TASK, "subcategory": subcategory,
-           "secondary": [s for s in (secondary or []) if s != subcategory], "source": "annotation",
-           "annotator": ANNOTATOR, "labeled_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-           "notes": (notes or "").strip()}
-    with scheduler.lock:
-        with out_file.open("a") as f:
+def append(rec: dict):
+    with lock, scheduler.lock:
+        with session_file.open("a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    done[q["model_id"]] = rec
-    return view(next_index(i + 1))
+        reviews[(rec["task"], rec["model_id"])] = rec
 
 
-with gr.Blocks(title="Taxonomy of AI: annotate") as demo:
-    idx = gr.State(None)
-    progress = gr.Markdown()
-    header = gr.Markdown()
-    with gr.Row():
-        cat_buttons = [gr.Button(name, variant="primary") for _, name in CATS]
-    secondary = gr.CheckboxGroup(choices=[(n, c) for c, n in CATS], label="Also fits (optional, tick before clicking a category)")
-    notes = gr.Textbox(label="Notes (optional, saved with the label)", lines=1)
-    with gr.Row():
-        new_cat = gr.Textbox(label="New category (kebab-case id)", scale=3)
-        new_btn = gr.Button("Label as new category", scale=1)
-    with gr.Row():
-        unsure = gr.Button("Unsure")
-        other = gr.Button("Not a use case I track / misc")
-        bad = gr.Button("Not really audio-to-audio")
-        skip = gr.Button("Skip (no label)")
-    with gr.Row():
-        jump = gr.Number(label="Jump to # (1-based)", precision=0, scale=1)
-        jump_btn = gr.Button("Go", scale=1)
-    meta = gr.Markdown()
-    card = gr.Markdown(label="Model card")
+PROMPT = """You get a short voice note recorded while reviewing one Hugging Face model.
+Model: {model_id} (pipeline_tag {task}). Hub tags: {tags}.
+The reviewer's subcategories for this task (id: name): {cats}
 
-    outs = [idx, progress, header, meta, card, secondary, notes]
-    for (cid, _), b in zip(CATS, cat_buttons):
-        b.click(lambda i, s, n, cid=cid: record(i, cid, s, n), [idx, secondary, notes], outs)
-    new_btn.click(lambda i, s, n, c: record(i, "new:" + re.sub(r"[^a-z0-9-]+", "-", (c or "unnamed").lower()).strip("-"), s, n),
-                  [idx, secondary, notes, new_cat], outs)
-    unsure.click(lambda i, s, n: record(i, "_unsure", s, n), [idx, secondary, notes], outs)
-    other.click(lambda i, s, n: record(i, "_other", s, n), [idx, secondary, notes], outs)
-    bad.click(lambda i, s, n: record(i, "_not-task", s, n), [idx, secondary, notes], outs)
-    skip.click(lambda i: view(next_index((i or 0) + 1)), [idx], outs)
-    jump_btn.click(lambda j: view(min(max(int(j or 1), 1), len(queue)) - 1), [jump], outs)
-    demo.load(lambda: view(next_index(0)), None, outs)
+Return one JSON object with exactly these keys:
+- "transcript": verbatim transcript of the note. Fix only obvious ASR spellings of model, company and technical names.
+- "summary": one sentence, the reviewer's point in their own framing.
+- "verdict": "interesting" | "not-interesting" | "neutral", as the reviewer judged it.
+- "reasons": list of short phrases: why it is (or is not) interesting.
+- "subcategory": the subcategory id the reviewer places the model in, "new:<kebab-id>" if they name one not in the
+  list, or null if they don't place it. Don't guess from the model; only from what they say.
+- "secondary": list of other subcategory ids they say also fit.
+- "use_cases": list of uses they mention.
+- "mentioned_models": list of other models, people or projects they mention, as said.
+- "follow_up": anything they say they want to do (try it, compare, revisit), or null.
+Leave a list empty and a field null when the note doesn't say. Never invent content."""
 
-demo.launch()
+
+def to_mp3(raw: bytes) -> bytes:
+    with tempfile.TemporaryDirectory() as d:
+        src, dst = Path(d) / "in", Path(d) / "out.mp3"
+        src.write_bytes(raw)
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(src), "-ac", "1", "-ar", "16000", "-b:a", "48k",
+                        str(dst)], check=True, timeout=120)
+        return dst.read_bytes()
+
+
+def transcribe(mp3: bytes, model_id: str, task: str, tags: list, cats: list) -> tuple[dict, dict]:
+    if not OR_KEY:
+        raise HTTPException(500, "OPENROUTER_API_KEY secret missing")
+    prompt = PROMPT.format(model_id=model_id, task=task, tags=", ".join(tags[:30]) or "none",
+                           cats="; ".join(f"{c['id']}: {c['name']}" for c in cats))
+    body = {"model": NOTE_MODEL, "response_format": {"type": "json_object"}, "usage": {"include": True},
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "input_audio", "input_audio": {"data": base64.b64encode(mp3).decode(), "format": "mp3"}}]}]}
+    r = httpx.post("https://openrouter.ai/api/v1/chat/completions", json=body, timeout=180,
+                   headers={"Authorization": f"Bearer {OR_KEY}"})
+    if r.status_code != 200:
+        raise HTTPException(502, f"OpenRouter {r.status_code}: {r.text[:300]}")
+    j = r.json()
+    text = j["choices"][0]["message"]["content"] or ""
+    m = re.search(r"\{.*\}", text, re.S)
+    try:
+        out = json.loads(m.group(0) if m else text)
+    except json.JSONDecodeError:
+        out = {"transcript": text, "parse_error": True}
+    return out, {"model": j.get("model", NOTE_MODEL), "cost": (j.get("usage") or {}).get("cost")}
+
+
+@app.get("/")
+def index():
+    return FileResponse(Path(__file__).parent / "index.html")
+
+
+@app.get("/api/tasks")
+def tasks():
+    return {"tasks": TASKS}
+
+
+@app.get("/api/models")
+def models(task: str):
+    d = task_data(task)
+    return {**d, "reviews": {mid: r for (t, mid), r in reviews.items() if t == task}}
+
+
+@app.get("/api/card")
+def card(model: str):
+    try:
+        t = Path(hf_hub_download(model, "README.md", token=TOKEN)).read_text(errors="replace")
+    except Exception as e:
+        return {"markdown": f"*(no model card: {type(e).__name__})*"}
+    t = re.sub(r"\A---\n.*?\n---\n", "", t, flags=re.S).strip()
+    return {"markdown": (t[:CARD_CHARS] + ("\n\n*(card truncated)*" if len(t) > CARD_CHARS else "")) or "*(empty card)*"}
+
+
+@app.post("/api/review")
+def review(body: dict):
+    if not body.get("model_id") or not body.get("task"):
+        raise HTTPException(400, "model_id and task required")
+    rec = {"id": f"{datetime.now(timezone.utc):%Y-%m-%dT%H%M%S}_{uuid.uuid4().hex[:6]}", "model_id": body["model_id"],
+           "task": body["task"], "status": "reviewed", "reviewed_at": now(), "annotator": ANNOTATOR,
+           "audio": None, "transcript": None, "note": None, "asr": None}
+    append(rec)
+    return rec
+
+
+@app.post("/api/note")
+def note(model_id: str = Form(...), task: str = Form(...), audio: UploadFile = File(...)):
+    raw = audio.file.read()
+    if len(raw) < 1000:
+        raise HTTPException(400, "recording empty")
+    d = task_data(task)
+    q = next((m for m in d["models"] if m["model_id"] == model_id), {})
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    slug = re.sub(r"[^a-z0-9]+", "-", model_id.lower()).strip("-")[:50]
+    nid = f"{day}_{slug}_{uuid.uuid4().hex[:4]}"
+    ext = ".ogg" if "ogg" in (audio.content_type or "") else ".mp4" if "mp4" in (audio.content_type or "") else ".webm"
+    audio_rel, tr_rel = f"audio/{day}/{nid}{ext}", f"transcripts/{day}/{nid}.md"
+    with lock, scheduler.lock:  # keep the original even if transcription fails
+        (upload / audio_rel).parent.mkdir(parents=True, exist_ok=True)
+        (upload / audio_rel).write_bytes(raw)
+    try:
+        out, meta = transcribe(to_mp3(raw), model_id, task, q.get("tags", []), d["subcategories"])
+        status = "noted"
+    except Exception as e:
+        out, meta, status = {"error": str(getattr(e, "detail", e))[:300]}, {"model": NOTE_MODEL, "cost": None}, "note-failed"
+    transcript = out.pop("transcript", None)
+    with lock, scheduler.lock:
+        (upload / tr_rel).parent.mkdir(parents=True, exist_ok=True)
+        (upload / tr_rel).write_text(f"---\nid: {nid}\nmodel_id: {model_id}\ntask: {task}\nrecorded: {now()}\n"
+                                     f"asr: {meta['model']}\n---\n\n{(transcript or '').strip()}\n")
+    rec = {"id": nid, "model_id": model_id, "task": task, "status": status, "reviewed_at": now(), "annotator": ANNOTATOR,
+           "audio": audio_rel, "transcript": transcript, "note": out, "asr": meta}
+    append(rec)
+    scheduler.trigger()
+    return rec

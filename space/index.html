@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taxonomy of AI: review</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#2a2f3a; --fg:#e6e8ee; --dim:#8b93a5; --acc:#6aa9ff; --ok:#3fb950; --rec:#f85149; --warn:#d29922; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); height:100vh; display:flex; }
+  aside { width:380px; min-width:300px; border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .controls { padding:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px; border-bottom:1px solid var(--line); }
+  .controls input { grid-column:1/-1; }
+  select, input, button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  #count { grid-column:1/-1; color:var(--dim); font-size:12px; }
+  #list { overflow-y:auto; flex:1; }
+  .row { padding:6px 10px; border-bottom:1px solid #1d2129; cursor:pointer; display:flex; gap:8px; align-items:baseline; }
+  .row:hover { background:#1b1f27; }
+  .row.cur { background:#1f2a3d; }
+  .row .n { color:var(--dim); width:34px; text-align:right; font-size:12px; flex:none; }
+  .row .id { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .stat { color:var(--dim); font-size:12px; flex:none; }
+  .badge { font-size:11px; padding:0 5px; border-radius:4px; flex:none; }
+  .b-reviewed { background:#24402c; color:var(--ok); } .b-noted { background:#1d3557; color:var(--acc); }
+  .b-note-failed { background:#4a2a12; color:var(--warn); } .b-pending { background:#3a3320; color:var(--warn); }
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); }
+  header h2 { margin:0 0 4px; font-size:18px; } header h2 a { color:var(--acc); text-decoration:none; }
+  .meta { color:var(--dim); font-size:12px; }
+  .actions { display:flex; gap:8px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  #rec { font-weight:600; padding:8px 16px; }
+  #rec.on { background:var(--rec); border-color:var(--rec); color:#fff; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.7; } }
+  #reviewed { padding:8px 16px; }
+  #status { color:var(--dim); font-size:12px; margin-left:auto; }
+  .keys { color:var(--dim); font-size:11px; }
+  kbd { border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:11px; }
+  #prevnote { padding:10px 16px; border-bottom:1px solid var(--line); background:#13161c; display:none; font-size:13px; }
+  #prevnote .tr { color:var(--dim); margin-top:4px; }
+  #card { padding:16px 24px; overflow-y:auto; flex:1; }
+  #card img { max-width:100%; } #card pre { background:var(--panel); padding:8px; overflow-x:auto; }
+  #card table { border-collapse:collapse; } #card td, #card th { border:1px solid var(--line); padding:3px 6px; }
+  #card a { color:var(--acc); }
+  .tags { margin-top:4px; } .tag { display:inline-block; font-size:11px; color:var(--dim); border:1px solid var(--line); border-radius:4px; padding:0 4px; margin:2px 2px 0 0; }
+</style>
+</head>
+<body>
+<aside>
+  <div class="controls">
+    <select id="task" title="Task"></select>
+    <select id="sort" title="Sort">
+      <option value="trending_score">Trending</option>
+      <option value="downloads_30d">Downloads (30 d)</option>
+      <option value="downloads_all_time">Downloads (all time)</option>
+      <option value="likes">Likes</option>
+      <option value="created_at">Newest</option>
+    </select>
+    <select id="show" title="Show">
+      <option value="todo">Not yet reviewed</option>
+      <option value="all">All</option>
+      <option value="done">Reviewed or noted</option>
+      <option value="noted">With a note</option>
+    </select>
+    <select id="sub" title="Tag-signal subcategory"><option value="">Any subcategory</option></select>
+    <input id="q" placeholder="Filter by id or tag">
+    <div id="count"></div>
+  </div>
+  <div id="list"></div>
+</aside>
+<main>
+  <header><h2 id="title">Loading…</h2><div class="meta" id="meta"></div><div class="tags" id="tags"></div></header>
+  <div class="actions">
+    <button id="rec" title="r">● Record note</button>
+    <button id="reviewed" title="n">✓ Reviewed, no note</button>
+    <button id="prev" title="k">↑ Prev</button>
+    <button id="next" title="j">↓ Skip</button>
+    <span class="keys"><kbd>r</kbd> record / stop+save <kbd>Esc</kbd> cancel <kbd>n</kbd> reviewed <kbd>j</kbd>/<kbd>k</kbd> next/prev</span>
+    <span id="status"></span>
+  </div>
+  <div id="prevnote"></div>
+  <div id="card"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let D = null, view = [], cur = null, rec = null, chunks = [], pending = {}, cardReq = 0;
+const fmt = n => (n || 0).toLocaleString();
+const st = (t, c) => { $('status').textContent = t; $('status').style.color = c || ''; };
+
+async function j(url, opt) { const r = await fetch(url, opt); if (!r.ok) throw new Error(r.status + ' ' + await r.text()); return r.json(); }
+
+async function loadTask() {
+  st('loading models…');
+  D = await j('api/models?task=' + encodeURIComponent($('task').value));
+  $('sub').innerHTML = '<option value="">Any subcategory</option>' + D.subcategories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  st(D.live === true ? `live Hub stats, ${D.loaded_at.slice(0,16).replace('T',' ')} UTC` : 'snapshot stats (live fetch failed)');
+  cur = null; render(true);
+}
+
+function stateOf(id) { return pending[id] ? 'pending' : (D.reviews[id] || {}).status; }
+
+function render(pickFirst) {
+  const sort = $('sort').value, show = $('show').value, sub = $('sub').value, q = $('q').value.toLowerCase().trim();
+  view = D.models.filter(m => {
+    const s = stateOf(m.model_id);
+    if (show === 'todo' && s) return false;
+    if (show === 'done' && !s) return false;
+    if (show === 'noted' && s !== 'noted') return false;
+    if (sub && !(m.suggested || []).includes(sub)) return false;
+    if (q && !m.model_id.toLowerCase().includes(q) && !(m.tags || []).some(t => t.toLowerCase().includes(q))) return false;
+    return true;
+  });
+  view.sort(sort === 'created_at' ? (a, b) => (b.created_at || '').localeCompare(a.created_at || '') : (a, b) => (b[sort] || 0) - (a[sort] || 0));
+  const done = D.models.filter(m => D.reviews[m.model_id]).length;
+  $('count').textContent = `${view.length} shown · ${done} / ${D.models.length} reviewed in ${D.task}`;
+  const statKey = sort === 'created_at' ? 'downloads_30d' : sort;
+  $('list').innerHTML = view.map((m, i) => {
+    const s = stateOf(m.model_id);
+    return `<div class="row${m.model_id === cur ? ' cur' : ''}" data-id="${m.model_id}"><span class="n">${i + 1}</span>` +
+      `<span class="id">${m.model_id}</span>${s ? `<span class="badge b-${s}">${s}</span>` : ''}<span class="stat">${fmt(m[statKey])}</span></div>`;
+  }).join('');
+  if (pickFirst || (cur && !view.some(m => m.model_id === cur))) show_(view[0] && view[0].model_id);
+}
+
+async function show_(id) {
+  cur = id;
+  document.querySelectorAll('.row').forEach(r => r.classList.toggle('cur', r.dataset.id === id));
+  const row = document.querySelector(`.row[data-id="${CSS.escape(id || '')}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
+  if (!id) { $('title').textContent = 'Nothing left in this view'; $('meta').textContent = ''; $('tags').innerHTML = ''; $('card').innerHTML = ''; $('prevnote').style.display = 'none'; return; }
+  const m = D.models.find(x => x.model_id === id);
+  $('title').innerHTML = `<a href="https://huggingface.co/${id}" target="_blank" rel="noopener">${id}</a>`;
+  $('meta').textContent = `trending ${fmt(m.trending_score)} · downloads 30 d ${fmt(m.downloads_30d)} · all time ${fmt(m.downloads_all_time)} · likes ${fmt(m.likes)} · created ${(m.created_at || '').slice(0, 10)} · ${m.library_name || 'no library'}` +
+    ((m.suggested || []).length ? ' · tag-signal: ' + m.suggested.join(', ') : '');
+  $('tags').innerHTML = (m.tags || []).slice(0, 25).map(t => `<span class="tag">${t}</span>`).join('');
+  showPrev(id);
+  const req = ++cardReq; $('card').innerHTML = '<p class="meta">loading card…</p>';
+  const c = await j('api/card?model=' + encodeURIComponent(id)).catch(e => ({ markdown: '*(card failed: ' + e.message + ')*' }));
+  if (req === cardReq) { $('card').innerHTML = DOMPurify.sanitize(marked.parse(c.markdown)); $('card').scrollTop = 0; }
+}
+
+function showPrev(id) {
+  const r = D.reviews[id], p = $('prevnote');
+  if (!r) { p.style.display = 'none'; return; }
+  p.style.display = 'block';
+  const n = r.note || {};
+  p.innerHTML = `<b>${r.status}</b> ${r.reviewed_at.slice(0, 16).replace('T', ' ')} UTC` +
+    (n.summary ? ` · ${n.verdict || ''} · ${n.summary}` : '') + (n.subcategory ? ` · → <code>${n.subcategory}</code>` : '') +
+    (n.error ? ` · error: ${n.error}` : '') + (r.transcript ? `<div class="tr">“${r.transcript}”</div>` : '');
+}
+
+function step(d) {
+  const i = view.findIndex(m => m.model_id === cur);
+  const k = Math.min(Math.max(i + d, 0), view.length - 1);
+  if (view[k]) show_(view[k].model_id);
+}
+
+function advance(id) {  // after acting on id: move to the row after it, then re-filter
+  const i = view.findIndex(m => m.model_id === id);
+  const nxt = view[i + 1];
+  cur = nxt ? nxt.model_id : null;
+  render(!nxt);
+  if (nxt) show_(nxt.model_id);
+}
+
+async function markReviewed() {
+  if (!cur || rec) return;
+  const id = cur;
+  try { D.reviews[id] = await j('api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: id, task: D.task }) }); st('reviewed ' + id, 'var(--ok)'); }
+  catch (e) { st('review failed: ' + e.message, 'var(--rec)'); return; }
+  advance(id);
+}
+
+async function startRec() {
+  if (!cur) return;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  catch (e) { st('microphone blocked: ' + e.message, 'var(--rec)'); return; }
+  chunks = [];
+  rec = new MediaRecorder(stream);
+  rec.model = cur;
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.start();
+  $('rec').classList.add('on'); $('rec').textContent = '■ Stop and save';
+  st('recording note on ' + cur, 'var(--rec)');
+}
+
+function stopRec(save) {
+  if (!rec) return;
+  const r = rec, id = r.model; rec = null;
+  $('rec').classList.remove('on'); $('rec').textContent = '● Record note';
+  r.onstop = () => {
+    r.stream.getTracks().forEach(t => t.stop());
+    if (!save) { st('recording discarded'); return; }
+    const blob = new Blob(chunks, { type: r.mimeType });
+    upload(id, blob);
+  };
+  r.stop();
+  if (save) advance(id);
+}
+
+async function upload(id, blob) {
+  pending[id] = true; render(false);
+  st(`transcribing note on ${id}… (${Object.keys(pending).length} pending)`, 'var(--warn)');
+  const fd = new FormData();
+  fd.append('model_id', id); fd.append('task', D.task); fd.append('audio', blob, 'note' + (blob.type.includes('ogg') ? '.ogg' : blob.type.includes('mp4') ? '.mp4' : '.webm'));
+  try {
+    const r = await j('api/note', { method: 'POST', body: fd });
+    D.reviews[id] = r;
+    st(r.status === 'noted' ? `noted ${id}: ${(r.note || {}).summary || ''}` : `saved audio for ${id}, transcription failed`, r.status === 'noted' ? 'var(--ok)' : 'var(--warn)');
+  } catch (e) { st('note upload failed for ' + id + ': ' + e.message, 'var(--rec)'); }
+  delete pending[id]; render(false); if (cur === id) showPrev(id);
+}
+
+$('rec').onclick = () => rec ? stopRec(true) : startRec();
+$('reviewed').onclick = markReviewed;
+$('next').onclick = () => step(1); $('prev').onclick = () => step(-1);
+$('list').onclick = e => { const r = e.target.closest('.row'); if (r && !rec) show_(r.dataset.id); };
+['sort', 'show', 'sub'].forEach(k => $(k).onchange = () => render(true));
+$('q').oninput = () => render(true);
+$('task').onchange = loadTask;
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'r') { e.preventDefault(); rec ? stopRec(true) : startRec(); }
+  else if (e.key === 'Escape') stopRec(false);
+  else if (e.key === 'n') markReviewed();
+  else if (e.key === 'j' && !rec) step(1);
+  else if (e.key === 'k' && !rec) step(-1);
+});
+window.addEventListener('beforeunload', e => { if (rec || Object.keys(pending).length) { e.preventDefault(); e.returnValue = ''; } });
+
+(async () => {
+  const t = await j('api/tasks');
+  $('task').innerHTML = t.tasks.map(x => `<option>${x}</option>`).join('');
+  await loadTask();
+})().catch(e => st('load failed: ' + e.message, 'var(--rec)'));
+</script>
+</body>
+</html>
